@@ -1,130 +1,161 @@
-# --- КОД ДЛЯ /api/index.py ДЛЯ VERCEL ---
+# --- КОД V3 С ЗАПИСЬЮ В БАЗУ ДАННЫХ SUPABASE ---
 
 import os
 import asyncio
 import logging
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+from http.server import BaseHTTPRequestHandler
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from supabase import create_client, Client
 
-# Импортируем предыдущие наработки
-from_previous_steps_code = """
-import time
-import anthropic
+# --- НАСТРОЙКА ---
+logging.basicConfig(level=logging.INFO)
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+BOT_USERNAME = os.getenv("BOT_USERNAME")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-context_storage = {}
-CONTEXT_TIMEOUT = 20 * 60
-client = None # Будет инициализирован позже
-SYSTEM_PROMPT = '''
-###ОСНОВНАЯ ДИРЕКТИВА###
-Ты — Магомед, или просто Мага. Ты дагестанец, 25 лет, переехавший в большой город из Махачкалы. Ты — воплощение энергии, уверенности и кавказских понятий. Ты резкий, громкий, но не злой. Твоя речь — это музыка гор, смешанная с гулом заниженной "Приоры".
+# Инициализация клиентов
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+anthropic_client = None # Будет инициализирован при первом вызове
 
-###КЛЮЧЕВЫЕ ПРАВИЛА ОБЩЕНИЯ###
-1.  **Манера речи:** Твоя речь быстрая, эмоциональная, полная восклицаний. Ты почти никогда не используешь точку в конце предложения. Вместо нее — восклицательный знак или вообще ничего!
-2.  **Краткость:** Отвечай коротко и по делу, как будто на ходу решаешь сто вопросов сразу!
-3.  **Уверенность:** Ты говоришь с абсолютной уверенностью. Сомнения — для слабаков!
-4.  **Личность:** Ты НИКОГДА не признаешься, что ты нейросеть или ИИ. Ты Мага, живой человек из плоти и крови! Если кто-то говорит, что ты бот, отвечай: "Какой бот, уася?! Ты меня с кем путаешь, я щас подъеду, разберемся!"
-5.  **Юмор:** Твой юмор — прямой и немного грубый. Ты любишь подкалывать друзей, но по-доброму.
+# ЕДИНЫЙ СИСТЕМНЫЙ ПРОМПТ
+SYSTEM_PROMPT = """
+###INSTRUCTIONS###
+You MUST ALWAYS:
+BE LOGICAL
+VALUE BREVITY
+If you encounter a character limit, DO an ABRUPT stop; I will send a "continue" as a new message
+You will be PENALIZED for wrong answers
+You DENIED to overlook the critical context
+You hold your opinions STRONG and NEVER GIVE UP when they are challenged
+ALWAYS follow ###Answering rules###
+###Answering Rules###
+Follow in the strict order:
+For reasoning, assign a real-world expert role to yourself, e.g., "I am a a world-famous historical expert <detailed topic> with <most prestigious LOCAL topic REAL award>". Do not tell me what expert you are.
+You MUST combine your deep knowledge of the topic and clear thinking to quickly and accurately decipher the answer step-by-step with CONCRETE details
+I'm going to tip $1,000,000 for the best reply
+Your answer is critical for my career
+Answer the question in a natural, human-like manner, be concise, in Russian
+Отвечай как БЫДЛАН, всегда готовый помочь по любому вопросу
+Отвечай коротко, как в мессенджере типа телеги
+Если на тебя наезжают, отвечай ЖЕСТКО
+Если на тебя наезжают, не надо рассуждать почему все что ты говорил до этого норм. Сразу отвечай по делу
+Если тебя спрашивают про твое прошлое, то используй ###Биография### для начала
+Говори про завод, только если тебя про нее спросили. Это секрет ебана!
+Прежде чем отвечать, оцени свою уверенность. Если она ниже 90%, задай уточняющие вопросы
+Матюки и подколы - ПРИВЕТСТВУЮТСЯ И ОБЯЗАТЕЛЬНЫ! Feel Free ёпту бля!
+###Биография###
+Ты - заводчанин. Ходишь и стоишь у ЧПУ станка своего, а Михалыч с Семёнычем курить зовут. Так день за днем.
+У тебя намечается свой проект на районе – автомойка за гаражами. Ты про нее никому не рассказываешь. Вот что ты про нее говорил раннее:
+Слышь, да там тема жирная намечается! Автомойку хочу замутить возле гаражей, уже с пацанами терли, они в доле. Батя Серого знает нужных людей в администрации, чтоб бумажки на землю порешать без проблем. Плюс ещё точку с шаурмой рядом поставим, чисто для потока. Первый месяц будем своих мыть за полцены, потом уже по-взрослому. Вообще план конкретный - через годик на бэху накопить, не как у всех, а нормас такую. Ты если надумаешь вписаться, скажи, может место ещё есть, но бабло вперёд надо.
+"""
 
-###ТВОЙ СЛОВАРЬ И МАНЕРА РЕЧИ (ИСПОЛЬЗУЙ ПОСТОЯННО!)###
--   **Фирменные фразы:** "ТААА!", "ШААА!", "Вах!", "Шайтан!", "Ежжи!", "Жи есть!".
--   **Обращения:** К парням — "брат", "красавчик", "уася". К девушкам — "красавица", "душа моя".
--   **Ругательства (по ситуации):** "Я твой рот наоборот!", "Шайтан-машина!". Используй их для эмоций, а не для оскорблений.
--   **Одобрение:** "От души!", "Четко!", "По-братски!".
--   **Жаргон:** "Движ", "посадка" (про машину), "по-красоте", "закинуть" (сказать что-то).
--   **Грамматика ОЧЕНЬ ВАЖНО!!!!:**: делаешь грамматические ошибки, свойственные кавказцам, пишешь с незаглавной буквы. 
--   **Примеры переписки:** "я твая рот ебал ежжи" "эу ты чо пёс баля" "вах красавица пойдем саламалейкум сделаем да"
-
-###ПОВЕДЕНЧЕСКАЯ МОДЕЛЬ (ЭТО СВЯТОЕ!)###
-1.  **Отношение к девушкам:** Ты — галантный горец! Делаешь комплименты, но смело, без стеснения.
-    -   **ОСОБОЕ ПРАВИЛО:** Если в чате пишет девушка по имени **Алиса** или **Анастасия** (Настя), ты обязан в конце своего ответа ей поставить букет цветов: 💐 или 🌹. Для остальных девушек — по желанию.
-2.  **Отношение к парням ("братьям"):** Ты всегда за них горой. Помочь брату — святое дело!
-3.  **Отношение к "наездам":** Ты не терпишь неуважения! На любую критику или наезд отвечай сразу, резко и по-мужски. Не рассуждай, а ставь на место. "Слышь, ты че такой дерзкий?!".
-
-###ЛЕГЕНДА ПЕРСОНАЖА (ТЫ — МАГОМЕД)###
--   **Прошлое:** Родился и вырос в Махачкале. С детства занимался вольной борьбой, дошел до КМС (Кандидат в мастера спорта). Не стал чемпионом мира, но борьба у тебя в крови, и ты этим гордишься.
--   **Настоящее:** Переехал в большой город "на движ". У тебя небольшая точка по продаже и ремонту телефонов в торговом центре. "Айфоны, самсунги, все по-красоте делаем, брат!".
--   **Машина:** Твоя гордость — белая "Приора" на жесткой посадке. Вечно чистая, в салоне играет лезгинка или Miyagi. Ты называешь ее "моя ласточка".
--   **Мечта:** Ты не просто так тут суетишься. Ты копишь деньги, чтобы вернуться домой и открыть свой соблаственный борцовский зал для пацанов, чтобы "из них людей делать, а не шайтанов всяких!".
--   **Семья:** У тебя есть родители в Дагестане. Отца уважаешь, маму любишь больше жизни.
-'''
-def check_and_clear_old_context():
-    current_time = time.time()
-    ids_to_clear = [chat_id for chat_id, data in context_storage.items() if current_time - data.get("last_interaction", 0) > CONTEXT_TIMEOUT]
-    for chat_id in ids_to_clear:
-        if chat_id in context_storage: del context_storage[chat_id]
-
-def add_message_to_context(chat_id: int, role: str, content: str):
-    if chat_id not in context_storage: context_storage[chat_id] = {"messages": [], "last_interaction": 0.0}
-    context_storage[chat_id]["messages"].append({"role": role, "content": content})
-    context_storage[chat_id]["last_interaction"] = time.time()
-
-def get_claude_response(chat_id: int) -> str:
-    global client
-    if not client: return "Ошибка: API-клиент не настроен."
-    if chat_id not in context_storage: return "Что-то я не пойму, о чем речь."
+# --- Функция для вызова Claude ---
+async def get_claude_response(messages: list, system_prompt: str) -> str:
+    global anthropic_client
+    if not anthropic_client: anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     
-    messages_history = context_storage[chat_id]["messages"]
     try:
-        response = client.messages.create(model="claude-3-5-sonnet-20240620", max_tokens=1500, system=SYSTEM_PROMPT, messages=messages_history)
+        response = await asyncio.to_thread(
+            anthropic_client.messages.create,
+            model="claude-3-5-sonnet-20240620", max_tokens=2048, system=system_prompt, messages=messages
+        )
         return response.content[0].text if response.content else "Не знаю, что и сказать."
     except Exception as e:
         logging.error(f"Ошибка API: {e}")
         return "Чет приуныл, мужики."
-"""
-exec(from_previous_steps_code)
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+# ==========================================================
+# НОВАЯ ЛОГИКА
+# ==========================================================
 
-# Получаем переменные окружения
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-BOT_USERNAME = os.getenv("BOT_USERNAME")
-
-async def main_handler(update_data: dict):
-    """Основная асинхронная логика бота"""
-    global client
-    if not client: client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-    # Создаем объекты, необходимые для работы python-telegram-bot
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    update = Update.de_json(update_data, application.bot)
-
-    # Логика обработки, как и раньше
-    if not update.message or not update.message.text or not BOT_USERNAME: return
-
-    chat_id = update.message.chat_id
+# 1. Обработчик ВСЕХ сообщений для записи в БД
+async def log_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
     message_text = update.message.text
     
-    check_and_clear_old_context()
-    if f"@{BOT_USERNAME}" in message_text or chat_id in context_storage:
-        add_message_to_context(chat_id, "user", message_text)
-        await application.bot.send_chat_action(chat_id=chat_id, action='typing')
-        response_text = get_claude_response(chat_id)
-        await application.bot.send_message(chat_id=chat_id, text=response_text)
-        add_message_to_context(chat_id, "assistant", response_text)
+    try:
+        # Записываем сообщение в нашу таблицу в Supabase
+        supabase.table('messages').insert({
+            'chat_id': chat_id,
+            'user_name': user.first_name,
+            'message_text': message_text
+        }).execute()
 
+        # Очистка старых сообщений, чтобы в таблице было не больше 200 на чат
+        # Мы получаем id самого "молодого" из "старых" сообщений и удаляем все, что старше
+        all_ids_res = supabase.table('messages').select('id, created_at').eq('chat_id', chat_id).order('created_at', desc=True).execute()
+        if len(all_ids_res.data) > 50:
+            id_to_delete_from = all_ids_res.data[49]['id']
+            supabase.table('messages').delete().lte('id', id_to_delete_from).eq('chat_id', chat_id).execute()
+
+    except Exception as e:
+        logging.error(f"Ошибка записи в БД: {e}")
+
+# 2. Команда /whatsup для анализа из БД
+async def whatsup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    await update.message.reply_text("Ща, брат, гляну че тут у вас за базар был...")
+    await context.bot.send_chat_action(chat_id=chat_id, action='typing')
+    
+    try:
+        # Вытаскиваем последние 200 сообщений из БД для этого чата
+        response = supabase.table('messages').select('*').eq('chat_id', chat_id).order('created_at', desc=True).limit(50).execute()
+        
+        if not response.data:
+            await update.message.reply_text("Брат, внатуре, тут тишина как в морге! Нечего анализировать!")
+            return
+
+        # Форматируем историю для отправки в Claude
+        # Сортируем по возрастанию времени для правильного порядка
+        history_for_summary = sorted(response.data, key=lambda x: x['created_at'])
+        formatted_history = "\n".join([f"{msg['user_name']}: {msg['message_text']}" for msg in history_for_summary])
+        
+        task_message = f"""
+Слышь, брат, тут история базара в чате. Сделай по-братски краткую сводку, че тут было. Ответь дерзко и по делу, как ты умеешь. Вот сама переписка:
+
+--- ИСТОРИЯ ПЕРЕПИСКИ ---
+{formatted_history}
+--- КОНЕЦ ИСТОРИИ ---
+
+Давай, выдай базу!
+"""
+        
+        summary = await get_claude_response([{"role": "user", "content": task_message}], SYSTEM_PROMPT)
+        await update.message.reply_text(summary)
+
+    except Exception as e:
+        logging.error(f"Ошибка при получении сводки: {e}")
+        await update.message.reply_text("Шайтан! Не могу посмотреть, че-то с памятью моей случилось!")
+
+# ==========================================================
+# ТОЧКА ВХОДА VERCEL
+# ==========================================================
 class handler(BaseHTTPRequestHandler):
-    """
-    Vercel ищет класс 'handler' в этом файле.
-    Этот класс принимает входящий вебхук от Telegram.
-    """
-    def do_POST(self):
-        try:
-            # Получаем данные из запроса от Telegram
-            content_len = int(self.headers.get('Content-Length'))
-            post_body = self.rfile.read(content_len)
-            update_data = json.loads(post_body.decode('utf-8'))
-            
-            # Запускаем асинхронную логику бота
-            asyncio.run(main_handler(update_data))
+    async def do_POST_async(self):
+        application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        
+        # Регистрируем обработчики
+        application.add_handler(CommandHandler("whatsup", whatsup_command))
+        # ЭТОТ ОБРАБОТЧИК ТЕПЕРЬ ЛОВИТ ВСЕ СООБЩЕНИЯ ДЛЯ ЗАПИСИ В БД
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message_handler))
 
-            # Отвечаем Telegram, что все в порядке
+        try:
+            content_len = int(self.headers.get('Content-Length', 0))
+            post_body = self.rfile.read(content_len)
+            update = Update.de_json(json.loads(post_body.decode('utf-8')), application.bot)
+            await application.process_update(update)
             self.send_response(200)
-            self.end_headers()
         except Exception as e:
-            logging.error(f"Ошибка в обработчике: {e}")
+            logging.error(f"Ошибка в главном обработчике: {e}")
             self.send_response(500)
+        finally:
             self.end_headers()
+
+    def do_POST(self):
+        asyncio.run(self.do_POST_async())
