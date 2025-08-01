@@ -75,27 +75,34 @@ async def get_claude_response(messages: list, system_prompt: str) -> str:
 
 # 1. Обработчик ВСЕХ сообщений для записи в БД
 async def log_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Добавляем импорты для работы со временем
+    from datetime import datetime, timezone, timedelta
+
     chat_id = update.effective_chat.id
     user = update.effective_user
     message_text = update.message.text
     
     try:
-        # Записываем сообщение в нашу таблицу в Supabase
+        # --- ШАГ 1: Записываем новое сообщение ---
         supabase.table('messages').insert({
             'chat_id': chat_id,
             'user_name': user.first_name,
             'message_text': message_text
         }).execute()
 
-        # Очистка старых сообщений, чтобы в таблице было не больше 200 на чат
-        # Мы получаем id самого "молодого" из "старых" сообщений и удаляем все, что старше
-        all_ids_res = supabase.table('messages').select('id, created_at').eq('chat_id', chat_id).order('created_at', desc=True).execute()
-        if len(all_ids_res.data) > 50:
-            id_to_delete_from = all_ids_res.data[49]['id']
-            supabase.table('messages').delete().lte('id', id_to_delete_from).eq('chat_id', chat_id).execute()
+        # --- ШАГ 2: Очистка старых сообщений ---
+        # Устанавливаем временную границу (например, 4 часа назад)
+        # Важно использовать UTC, так как базы данных обычно работают в этом часовом поясе
+        time_threshold = datetime.now(timezone.utc) - timedelta(hours=4)
+        
+        # Выполняем запрос на удаление всех записей для этого чата,
+        # которые были созданы до нашей временной границы
+        supabase.table('messages').delete().eq('chat_id', chat_id).lt('created_at', time_threshold.isoformat()).execute()
+        
+        logging.info(f"Сообщение от {user.first_name} в чате {chat_id} записано. Старые записи очищены.")
 
     except Exception as e:
-        logging.error(f"Ошибка записи в БД: {e}")
+        logging.error(f"Ошибка записи/очистки в БД: {e}")```
 
 # 2. Команда /whatsup для анализа из БД
 async def whatsup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -173,4 +180,5 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Запускаем асинхронную версию
         asyncio.run(self.do_POST_async())
+
 
