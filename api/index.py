@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from supabase import create_client, Client
+import anthropic
 
 # --- НАСТРОЙКА ---
 logging.basicConfig(level=logging.INFO)
@@ -172,3 +173,4 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Запускаем асинхронную версию
         asyncio.run(self.do_POST_async())
+
