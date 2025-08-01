@@ -134,23 +134,35 @@ async def whatsup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Шайтан! Не могу посмотреть, че-то с памятью моей случилось!")
 
 # ==========================================================
-# ТОЧКА ВХОДА VERCEL
+# ТОЧКА ВХОДА VERCEL (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 # ==========================================================
 class handler(BaseHTTPRequestHandler):
     async def do_POST_async(self):
+        # Инициализируем приложение
         application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         
-        # Регистрируем обработчики
+        # Регистрируем наши обработчики
         application.add_handler(CommandHandler("whatsup", whatsup_command))
-        # ЭТОТ ОБРАБОТЧИК ТЕПЕРЬ ЛОВИТ ВСЕ СООБЩЕНИЯ ДЛЯ ЗАПИСИ В БД
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, log_message_handler))
 
+        # --- ИСПРАВЛЕНИЕ, ШАГ 1: ЯВНАЯ ИНИЦИАЛИЗАЦИЯ ---
+        await application.initialize()
+
         try:
+            # Получаем данные из запроса
             content_len = int(self.headers.get('Content-Length', 0))
             post_body = self.rfile.read(content_len)
             update = Update.de_json(json.loads(post_body.decode('utf-8')), application.bot)
+            
+            # Обрабатываем обновление
             await application.process_update(update)
+
+            # --- ИСПРАВЛЕНИЕ, ШАГ 2: ЯВНОЕ ЗАВЕРШЕНИЕ РАБОТЫ ---
+            await application.shutdown()
+
+            # Отвечаем Telegram, что все хорошо
             self.send_response(200)
+
         except Exception as e:
             logging.error(f"Ошибка в главном обработчике: {e}")
             self.send_response(500)
@@ -158,4 +170,5 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        # Запускаем асинхронную версию
         asyncio.run(self.do_POST_async())
