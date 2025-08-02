@@ -74,6 +74,7 @@ async def get_claude_response(messages: list, system_prompt: str) -> str:
 # ==========================================================
 
 # 1. Обработчик ВСЕХ сообщений для записи в БД
+# 1. Обработчик ВСЕХ сообщений для записи в БД и очистки по времени (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 async def log_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Добавляем импорты для работы со временем
     from datetime import datetime, timezone, timedelta
@@ -92,7 +93,6 @@ async def log_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         # --- ШАГ 2: Очистка старых сообщений ---
         # Устанавливаем временную границу (например, 4 часа назад)
-        # Важно использовать UTC, так как базы данных обычно работают в этом часовом поясе
         time_threshold = datetime.now(timezone.utc) - timedelta(hours=4)
         
         # Выполняем запрос на удаление всех записей для этого чата,
@@ -102,7 +102,7 @@ async def log_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         logging.info(f"Сообщение от {user.first_name} в чате {chat_id} записано. Старые записи очищены.")
 
     except Exception as e:
-        logging.error(f"Ошибка записи/очистки в БД: {e}")```
+        logging.error(f"Ошибка записи/очистки в БД: {e}")
 
 # 2. Команда /whatsup для анализа из БД
 async def whatsup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -180,5 +180,6 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Запускаем асинхронную версию
         asyncio.run(self.do_POST_async())
+
 
 
