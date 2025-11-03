@@ -62,7 +62,7 @@ async def get_claude_response(messages: list, system_prompt: str) -> str:
     try:
         response = await asyncio.to_thread(
             anthropic_client.messages.create,
-            model="claude-3-5-sonnet-20240620", max_tokens=2048, system=system_prompt, messages=messages
+            model="claude-sonnet-4-5-20250929", max_tokens=2048, system=system_prompt, messages=messages
         )
         return response.content[0].text if response.content else "Не знаю, что и сказать."
     except Exception as e:
@@ -180,6 +180,7 @@ class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Запускаем асинхронную версию
         asyncio.run(self.do_POST_async())
+
 
 
 
